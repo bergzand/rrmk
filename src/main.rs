@@ -50,14 +50,15 @@ async fn main(spawner: Spawner) {
         Input::new(p.P1_02, Pull::Up),
         Input::new(p.P1_01, Pull::Up),
     ];
+    let signals: &'static [[matrix::SignalT; 7];4] = singleton!(: [[matrix::SignalT;7];4] = core::array::from_fn(|_| core::array::from_fn(|_|Signal::new()))).unwrap();
 
-    let matrix: &'static mut matrix::Matrix<embassy_nrf::gpio::Input, embassy_nrf::gpio::Output, 7,4> =
-        singleton!(: matrix::Matrix<embassy_nrf::gpio::Input, embassy_nrf::gpio::Output, 7,4> = matrix::Matrix::new(input_cols, output_rows)).unwrap();
+    let matrix: &'static mut matrix::Matrix<Input, Output, 7,4> =
+        singleton!(: matrix::Matrix<Input, Output, 7,4> = matrix::Matrix::new(input_cols, output_rows, signals)).unwrap();
 
-    let btn1 = matrix.take_pin(0, 0, &S1);
-    let btn2 = matrix.take_pin(0, 1, &S2);
-    let btn3 = matrix.take_pin(1, 0, &S3);
-    let btn4 = matrix.take_pin(1, 1, &S4);
+    let btn1 = matrix.take_pin(0, 0);
+    let btn2 = matrix.take_pin(0, 1);
+    let btn3 = matrix.take_pin(1, 0);
+    let btn4 = matrix.take_pin(1, 1);
 
     spawner.spawn(button_task(1, btn1)).unwrap();
     spawner.spawn(button_task(2, btn2)).unwrap();

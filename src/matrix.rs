@@ -7,13 +7,15 @@ use embassy_time::Timer;
 use embedded_hal::digital::{ErrorType, InputPin, OutputPin};
 use embedded_hal_async::digital::Wait;
 
+pub type SignalT = signal::Signal<CriticalSectionRawMutex, bool>;
+
 pub(crate) struct KeyPin<'a> {
-    signal: &'a signal::Signal<CriticalSectionRawMutex, bool>,
+    signal: &'a SignalT,
     state: bool,
 }
 
 impl<'a> KeyPin<'a> {
-    pub(crate) fn new(signal: &'a signal::Signal<CriticalSectionRawMutex, bool>) -> Self {
+    pub(crate) fn new(signal: &'a SignalT) -> Self {
         Self {
             state: false,
             signal,
@@ -112,7 +114,8 @@ pub(crate) struct Matrix<
 > {
     input_pins: [In; INPUT_PIN_NUM],
     output_pins: [Out; OUTPUT_PIN_NUM],
-    key_states: [[KeyState<'a>; INPUT_PIN_NUM]; OUTPUT_PIN_NUM],
+    key_states: [[bool; INPUT_PIN_NUM]; OUTPUT_PIN_NUM],
+    key_handlers: &'a [[SignalT; INPUT_PIN_NUM]; OUTPUT_PIN_NUM],
 }
 
 impl<
@@ -123,22 +126,23 @@ impl<
         const OUTPUT_PIN_NUM: usize,
     > Matrix<'a, In, Out, INPUT_PIN_NUM, OUTPUT_PIN_NUM>
 {
-    pub(crate) fn new(input_pins: [In; INPUT_PIN_NUM], output_pins: [Out; OUTPUT_PIN_NUM]) -> Self {
+    pub(crate) fn new(input_pins: [In; INPUT_PIN_NUM], output_pins: [Out; OUTPUT_PIN_NUM], key_handlers: &'a [[SignalT; INPUT_PIN_NUM]; OUTPUT_PIN_NUM]) -> Self {
         Self {
             input_pins,
             output_pins,
             key_states: from_fn::<_, OUTPUT_PIN_NUM, _>(|_| {
-                from_fn::<_, INPUT_PIN_NUM, _>(|_| KeyState::new())
+                from_fn::<_, INPUT_PIN_NUM, _>(|_| false)
             }),
+            key_handlers,
         }
     }
 
-    async fn scan_row(out_pin: &mut Out, input_pins: &mut [In], key_states: &mut [KeyState<'_>]) {
+    async fn scan_row(out_pin: &mut Out, input_pins: &mut [In], key_states: &mut [bool], key_handlers: &[SignalT]) {
         out_pin.set_low().ok();
         Timer::after_micros(1).await;
         for (in_idx, in_pin) in input_pins.iter_mut().enumerate() {
             let state = in_pin.is_high().unwrap_or_default();
-            key_states[in_idx].set_value(state);
+            key_states[in_idx] = state;
         }
         out_pin.set_high().ok();
     }
@@ -147,7 +151,7 @@ impl<
         for (out_idx, out_pin) in self.output_pins.iter_mut().enumerate() {
             let inputs = self.input_pins.as_mut();
             let key_states = self.key_states[out_idx].as_mut();
-            Self::scan_row(out_pin, inputs, key_states).await;
+            Self::scan_row(out_pin, inputs, key_states, &self.key_handlers[out_idx]).await;
         }
     }
 
@@ -155,13 +159,11 @@ impl<
         &mut self,
         row: usize,
         col: usize,
-        s: &'b signal::Signal<CriticalSectionRawMutex, bool>,
     ) -> KeyPin<'c>
     where
-        'b: 'a,
-        'b: 'c,
+        'a: 'c
     {
-        self.key_states[row][col].signal = Some(s);
-        KeyPin::new(s)
+        let handler = &self.key_handlers[row][col];
+        KeyPin::new(handler)
     }
 }
